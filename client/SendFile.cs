@@ -5,68 +5,81 @@ using System.Text;
 namespace client;
 public class SentFile
 {
-    private readonly string _host;
-    private readonly int _port;
+    private static readonly LogData LogData = new LogData();
+    private static readonly Configuration Config = new Configuration("../../../config.txt");
+    private readonly int _delayMillisecondsBetweenRetries = Config.GetIntValue("delayMillisecondsBetweenRetries");
+    private readonly int _maxRetries = Config.GetIntValue("maxRetries");
+    private readonly int _timeoutMilliseconds = Config.GetIntValue("timeoutMilliseconds"); 
+    private readonly int _pingPort = Config.GetIntValue("pingPort"); 
+    private readonly int _delay = Config.GetIntValue("delay");
+    private readonly int _fileBufferSize = Config.GetIntValue("fileBufferSize");
+    private readonly int _pingBufferSize = Config.GetIntValue("pingBufferSize");
+    private readonly string _ipAddress;
+    private readonly int _fileTransferPort;
     private readonly string _filePath;
-    private const int RetryDelayMilliseconds = 2000; // Constant delay between retries
     private long _fileSize;
-    private const int MaxRetries = 1000;
-    private int _retryCount;
     private bool _fileSent;
-    private TcpClient _client;
-    private NetworkStream _networkStream;
-    private CancellationTokenSource _heartbeatTokenSource;
-    private readonly int _heartbeatInterval = 500; // 0.5 seconds
-    private TcpClient _heartbeatClient;
-    private readonly int _heartbeatPort = 1235; // Separate port for heartbeat
+    private TcpClient _client = null!;
+    private NetworkStream _networkStream = null!;
+    private CancellationTokenSource _pingTokenSource = null!;
+    private TcpClient _pingClient = null!;
+    
 
     public SentFile(string host, int port, string filePath)
     {
-        _host = host;
-        _port = port;
+        _ipAddress = host;
+        _fileTransferPort = port;
         _filePath = filePath;
     }
 
-    public async Task<bool> SendAsync()
+    public async Task<bool> InitialSendAsync()
     {
+        LogData.Log($"Start sending \"{_filePath}\"");
         try
         {
+            // get file size
             var fileInfo = new FileInfo(_filePath);
             _fileSize = fileInfo.Length;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting file info: {ex.Message}");
+            LogData.Log($"Error getting file info: {ex.Message}");
             return false;
         }
 
-        while (!_fileSent && _retryCount < MaxRetries)
+        var retryCount = 0;
+        while (!_fileSent && (retryCount <= _maxRetries))
         {
             try
             {
+                // connecting for file transfer
                 _client = new TcpClient();
-                await _client.ConnectAsync(_host, _port);
+                await _client.ConnectAsync(_ipAddress, _fileTransferPort);
                 _networkStream = _client.GetStream();
-
-                _heartbeatClient = new TcpClient();
-                await _heartbeatClient.ConnectAsync(_host, _heartbeatPort);
-                _heartbeatTokenSource = new CancellationTokenSource();
-                StartHeartbeat();
-                Console.WriteLine($"[{DateTime.Now}] Connected to server. Sending file: {_filePath}");
+                
+                // connecting for checking the connection status
+                _pingClient = new TcpClient();
+                await _pingClient.ConnectAsync(_ipAddress, _pingPort);
+                _pingTokenSource = new CancellationTokenSource();
+                
+                // start pinging and check for connection status
+                StartPing();
+                LogData.Log($"Successfully connected to server with IpAddress: \"{_ipAddress}\" " +
+                            $", fileTransfer ports: \"{_fileTransferPort}\" and ping Port: \"{_pingPort}\"");
+                
+                // send file data
                 await SendFileData();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[{DateTime.Now}] Error: {ex.Message}. Retrying...");
-                _retryCount++;
-                await Task.Delay(RetryDelayMilliseconds);
+                LogData.Log($"Error in connecting to server: {ex.Message}. Retrying number {retryCount}");
+                retryCount++;
+                await Task.Delay(_delayMillisecondsBetweenRetries);
             }
             finally
             {
-                StopHeartbeat();
-                _networkStream?.Close();
-                _client?.Close();
-                _heartbeatClient?.Close();
+                StopPing();
+                CloseConnections();
             }
         }
 
@@ -75,60 +88,72 @@ public class SentFile
 
     private async Task SendFileData()
 {
-    // Open the file stream
-    await using var fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read);
-
-    // Extract file name and size
-    string fileName = Path.GetFileName(_filePath);
-    _fileSize = fileStream.Length;
-
-    // Prepare the metadata message
-    string metadata = $"FileName:{fileName};Size:{_fileSize};\n";
-    byte[] metadataBytes = Encoding.UTF8.GetBytes(metadata);
-
-    // Send the metadata
-    await _networkStream.WriteAsync(metadataBytes, 0, metadataBytes.Length);
-    await _networkStream.FlushAsync();
-
-    // Wait a bit before sending the file content
-    await Task.Delay(100);
-    
-    Log($"Sent request for file: {fileName}, size: {_fileSize} bytes");
-    
-    byte[] serverFileSizeBytes = new byte[8];
-    _networkStream.Read(serverFileSizeBytes, 0, 8);
-    long serverFileSize = BitConverter.ToInt64(serverFileSizeBytes, 0);
-    if (serverFileSize == _fileSize)
+    try
     {
-        Log("File already exists on the server with the same size.");
-    }
-    else
-    {
-        fileStream.Seek(serverFileSize, SeekOrigin.Begin);
-   
-        Log($"Resuming file transfer from byte {serverFileSize}");
-        int bufferSize = 4096;
-        var buffer = new byte[bufferSize];
-        int bytesRead;
-        long totalSent = 0;
+        // Open the file stream
+        await using var fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read);
 
-        while ((bytesRead = await fileStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+        // Extract file name and size
+        var fileName = Path.GetFileName(_filePath);
+        _fileSize = fileStream.Length;
+
+        // Prepare the metadata message
+        var metadata = $"FileName:{fileName};Size:{_fileSize};\n";
+        var metadataBytes = Encoding.UTF8.GetBytes(metadata);
+
+        // Send the metadata
+        await _networkStream.WriteAsync(metadataBytes, 0, metadataBytes.Length);
+        await _networkStream.FlushAsync();
+
+        // Wait a bit before sending the file content
+        await Task.Delay(_delay);
+    
+        LogData.Log($"Sent request for file: \"{fileName}\", size: \"{_fileSize}\" bytes");
+    
+        var serverFileSizeBytes = new byte[8];
+        var read = _networkStream.Read(serverFileSizeBytes, 0, 8);
+        if (read == 8)
         {
-            
-            await _networkStream.WriteAsync(buffer, 0, bytesRead);
-            totalSent += bytesRead;
-            await _networkStream.FlushAsync();
-            
-            //Console.WriteLine($"[{DateTime.Now}] new chunk sent. Sent {serverFileSize+totalSent} of {_fileSize} bytes");
-            if (!_client.Connected)
+            var serverFileSize = BitConverter.ToInt64(serverFileSizeBytes, 0);
+            if (serverFileSize == _fileSize)
             {
-                throw new InvalidOperationException("Connection lost. Attempting to reconnect...");
+                LogData.Log("File already exists on the server with the same size.");
+            }
+            else
+            {
+                fileStream.Seek(serverFileSize, SeekOrigin.Begin);
+   
+                LogData.Log($"Resuming file transfer from byte {serverFileSize}");
+                var buffer = new byte[_fileBufferSize];
+                int bytesRead;
+
+                while ((bytesRead = await fileStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                {
+            
+                    await _networkStream.WriteAsync(buffer, 0, bytesRead);
+                    await _networkStream.FlushAsync();
+            
+                    //Log($" new chunk sent. Sent {serverFileSize+totalSent} of {_fileSize} bytes");
+                    if (!_client.Connected)
+                    {
+                        throw new InvalidOperationException("Connection lost. Attempting to reconnect...");
+                    }
+                }
             }
         }
+        else
+        {
+            throw new Exception($"serverFileSizeBytes is expected to be 8 bytes but is {read} bytes");
+        }
+        _fileSent = true;
+        LogData.Log($"File \"{fileName}\" sent successfully.");
+    } 
+    catch (Exception ex)
+    {
+        LogData.Log($"Error sending file: {ex.Message}");
+        await Task.Delay(_delayMillisecondsBetweenRetries);
     }
-
-    _fileSent = true;
-    Log("File sent.");
+    
 }
 
 
@@ -147,87 +172,91 @@ public class SentFile
         }
     }
 
-    private void StartHeartbeat()
+    private void StartPing()
     {
-        Console.WriteLine("Ping-Pong Heartbeat Started!");
+        LogData.Log("Ping-Pong Started!");
         Task.Run(async () =>
         {
-            var heartbeatStream = _heartbeatClient.GetStream();
-            var heartbeatMessage = Encoding.UTF8.GetBytes("ping\n");
-            var responseBuffer = new byte[1024];
-            int pongTimeoutMilliseconds = 100; // 0.5 second timeout for pong response
+            var pingStream = _pingClient.GetStream();
+            var pingMessage = Encoding.UTF8.GetBytes("ping\n");
+            var responseBuffer = new byte[_pingBufferSize];
 
-            while (!_heartbeatTokenSource.Token.IsCancellationRequested)
+            while (!_pingTokenSource.Token.IsCancellationRequested)
             {
                 try
                 {
-                    await heartbeatStream.WriteAsync(heartbeatMessage, 0, heartbeatMessage.Length);
-                    Console.WriteLine("Ping sent to server.");
-
-                    string response = await ReadWithTimeout(heartbeatStream, responseBuffer, pongTimeoutMilliseconds);
-                    if (response.Trim() != "pong")
+                    if (pingStream.CanWrite)
                     {
-                        throw new Exception("Pong not received.");
+                        await pingStream.WriteAsync(pingMessage, 0, pingMessage.Length);
+                        LogData.Log("Ping sent to server.");
+
+                        string response = await ReadWithTimeout(pingStream, responseBuffer, _timeoutMilliseconds);
+                        if (response.Trim() != "pong")
+                        {
+                            throw new Exception("Pong not received.");
+                        }
+                        LogData.Log("Pong received from server.");
                     }
-                    Console.WriteLine("Pong received from server.");
+                    else
+                    {
+                        // Handle the case where the stream cannot be written (disposed)
+                        LogData.Log("Cannot write to the ping stream. Attempting to reconnect...");
+                        await ReconnectAsync();
+                    }
                 }
                 catch (TimeoutException)
                 {
-                    Console.WriteLine("Pong reception timed out. Attempting to reconnect...");
+                    LogData.Log("Pong reception timed out. Attempting to reconnect...");
                     await ReconnectAsync();
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error in heartbeat: {ex.Message}. Attempting to reconnect...");
+                    LogData.Log($"Error in pinging: {ex.Message}. Attempting to reconnect...");
                     await ReconnectAsync();
                 }
 
-                await Task.Delay(_heartbeatInterval);
+                await Task.Delay(_delay);
             }
-        }, _heartbeatTokenSource.Token);
+        }, _pingTokenSource.Token);
     }
 
     private async Task ReconnectAsync()
     {
-        int maxRetries = 1000;
-        int delayBetweenRetriesInSeconds = 1;
-
-        for (int retry = 0; retry < maxRetries; retry++)
+        for (var retry = 0; retry <= _maxRetries; retry++)
         {
             try
             {
                 CloseConnections(); // Close previous connections if any
 
-                await ReconnectClientAsync(_client, _host, _port);
-                Console.WriteLine("Reconnected to the file transfer server.");
+                await ReconnectClientAsync(_client, _ipAddress, _fileTransferPort);
+                LogData.Log("Reconnected to the file transfer server.");
 
-                await ReconnectClientAsync(_heartbeatClient, _host, _heartbeatPort);
-                StartHeartbeat();
-                Console.WriteLine("Reconnected to the heartbeat server.");
+                await ReconnectClientAsync(_pingClient, _ipAddress, _pingPort);
+                StartPing();
+                LogData.Log("Reconnected to the ping server.");
 
                 return; // Successful connection, exit the method
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Attempt {retry + 1} failed to reconnect: {ex.Message}");
-                StopHeartbeat();
+                LogData.Log($"Attempt {retry + 1} failed to reconnect: {ex.Message}");
+                StopPing();
             }
 
-            if (retry < maxRetries - 1)
+            if (retry <= _maxRetries)
             {
-                Console.WriteLine($"Waiting {delayBetweenRetriesInSeconds} seconds before next attempt...");
-                await Task.Delay(TimeSpan.FromSeconds(delayBetweenRetriesInSeconds));
+                LogData.Log($"Waiting {_delayMillisecondsBetweenRetries} Milliseconds before next attempt...");
+                await Task.Delay(_delayMillisecondsBetweenRetries);
             }
         }
-
-        Console.WriteLine("All reconnect attempts failed.");
+        LogData.Log("All reconnect attempts failed.");
     }
 
     private void CloseConnections()
     {
         _networkStream?.Close();
         _client?.Close();
-        _heartbeatClient?.Close();
+        _pingClient?.Close();
     }
 
     private async Task ReconnectClientAsync(TcpClient client, string host, int port)
@@ -241,40 +270,11 @@ public class SentFile
             _networkStream = client.GetStream();
         }
     }
-
-
-
-    private void StopHeartbeat()
-    {
-        _heartbeatTokenSource?.Cancel();
-        Console.WriteLine("Heartbeat stopped!");
-    }
-    private static void LogToFile(string message)
-    {
-        string logFilePath = "file_transfer_log.txt";
-
-        try
-        {
-            // AppendAllText will create the file if it does not exist
-            File.AppendAllText(logFilePath, $"{DateTime.Now}: {message}\n");
-        }
-        catch (IOException ioEx)
-        {
-            Console.WriteLine($"I/O Error while writing to log file: {ioEx.Message}");
-        }
-        catch (UnauthorizedAccessException uaEx)
-        {
-            Console.WriteLine($"Access Error while writing to log file: {uaEx.Message}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"An error occurred while writing to log file: {ex.Message}");
-        }
-    }
     
-    private static void Log(string message)
+    private void StopPing()
     {
-        Console.WriteLine($"[{DateTime.Now}] {message}");
-        // Additional logging to file can be implemented here.
+        _pingTokenSource?.Cancel();
+        LogData.Log("ping stopped!");
     }
+
 }

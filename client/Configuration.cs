@@ -72,4 +72,5 @@ public class Configuration
         string key = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "windowsIp" : "linuxIp";
         return GetStringValue(key);
     }
+    
 }

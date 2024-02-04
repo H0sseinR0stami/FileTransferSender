@@ -3,6 +3,7 @@ namespace client;
 
 internal static class Program
 {
+    private static readonly LogData LogData = new LogData();
     private static void Main(string[] args)
     {
         // reading configurations
@@ -10,28 +11,28 @@ internal static class Program
 
         try
         {
-            string osDependentPath = config.GetOsDependentPath();
+            var osDependentPath = config.GetOsDependentPath();
             
-            string watchFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, osDependentPath);
+            var watchFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, osDependentPath);
             if (!Directory.Exists(watchFolder))
             {
                 Directory.CreateDirectory(watchFolder);
-                Console.WriteLine($"Folder created at: {watchFolder}");
+                LogData.Log($"Send folder created at: \"{watchFolder}\"");
             }
 
-            long sizeLimitBytes = config.GetLongValue("sizeLimitBytes");
-            Console.WriteLine($"sizeLimitBytes is {sizeLimitBytes}");
+            var sizeLimitBytes = config.GetLongValue("sizeLimitBytes");
+            LogData.Log($"\"{watchFolder}\" sizeLimitBytes is \"{sizeLimitBytes}\"");
             var folderMonitor = new FileWatcherService(watchFolder, sizeLimitBytes);
             folderMonitor.StartWatching();
 
  
-            Console.WriteLine($"start watching folder: {osDependentPath}");
+            LogData.Log($"start watching folder: \"{osDependentPath}\"");
             Console.ReadLine(); // Keep the application running
             
         }
         catch (Exception ex)
         {
-            Console.WriteLine(ex.Message);
+            LogData.Log($"Error in creating or monitoring send folder: {ex.Message}");
         }
     }
 }
