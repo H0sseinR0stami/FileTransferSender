@@ -58,27 +58,27 @@ public class FolderMonitor
         return false; // File could not be deleted after retries
     }
 
-    public async Task<bool> TryDeleteFolder(string folderPath, int maxRetries, int initialDelayMilliseconds, int delayMillisecondsBetweenRetries)
+    public async Task<bool> TryDeleteFolder(string folderPath, int maxRetries, int delayMillisecondsBetweenRetries)
     {
         // Initial delay before the first deletion attempt
-        await Task.Delay(initialDelayMilliseconds);
-
-        for (int i = 0; i < maxRetries; i++)
+        await Task.Delay(delayMillisecondsBetweenRetries);
+        int i = 0;
+        while (Directory.Exists(folderPath) && (i <= maxRetries ))
         {
             try
             {
-                if (Directory.Exists(folderPath))
-                {
-                    Directory.Delete(folderPath, true); // true for recursive deletion
-                    return true; // Folder deleted successfully
-                }
-                return false; // Folder no longer exists
+                i++;
+                Console.WriteLine($"retry number {i} of {maxRetries}");
+                Directory.Delete(folderPath, true); // true for recursive deletion
+                
             }
             catch (IOException)
             {
                 await Task.Delay(delayMillisecondsBetweenRetries);
             }
         }
-        return false; // Folder could not be deleted after retries
+
+        return !Directory.Exists(folderPath);
+        
     }
 }

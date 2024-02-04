@@ -7,9 +7,9 @@ public class FileWatcherService
     private static readonly Configuration Config = new Configuration("../../../config.txt");
     private readonly string _ipAddress = Config.GetOsDependentIp();
     private readonly int _fileTransferPort = Config.GetIntValue("fileTransferPort");
-    private readonly int _maxDeleteFolderRetries = Config.GetIntValue("maxDeleteFolderRetries");
-    private readonly int _delayMillisecondsBetweenDeleteFolderRetries = Config.GetIntValue("delayMillisecondsBetweenDeleteFolderRetries");
-    private readonly int _initialDelayMillisecondsBeforeDeleteFolder = Config.GetIntValue("initialDelayMillisecondsBeforeDeleteFolder");
+    private readonly int _maxDeleteRetries = Config.GetIntValue("maxDeleteRetries");
+    private readonly int _delayMillisecondsBetweenDeleteRetries = Config.GetIntValue("delayMillisecondsBetweenDeleteRetries");
+    private readonly int _retryDelay = Config.GetIntValue("retryDelay");
     private readonly string _watchFolder;
     private readonly ConcurrentQueue<string> _fileQueue = new ConcurrentQueue<string>();
     private readonly Task _processingTask;
@@ -78,14 +78,14 @@ public class FileWatcherService
                     await HandleFileAsync(filePath,this);
                 }
             }
-            await Task.Delay(100);
+            await Task.Delay(_retryDelay);
         }
     }
 
     private async Task HandleDirectoryAsync(string directoryPath,FileWatcherService fileWatcherService)
     {
         Console.WriteLine($"A directory was added: {directoryPath}. Attempting to delete.");
-        var deleted = await _folderMonitor.TryDeleteFolder(directoryPath, _maxDeleteFolderRetries, _initialDelayMillisecondsBeforeDeleteFolder, _delayMillisecondsBetweenDeleteFolderRetries); // Example: 5 retries, 2-second initial delay, 1-second delay between retries
+        var deleted = await _folderMonitor.TryDeleteFolder(directoryPath, _maxDeleteRetries, _delayMillisecondsBetweenDeleteRetries); 
         if (deleted)
         {
             Console.WriteLine($"Directory '{directoryPath}' deleted successfully.");
@@ -104,7 +104,7 @@ public class FileWatcherService
         if (_folderMonitor.IsOverLimit())
         {
             Console.WriteLine($"Error: Folder size limit exceeded with file '{filePath}'. Deleting file.");
-            var deleted = await _folderMonitor.TryDeleteFile(filePath, 50, 1000);
+            var deleted = await _folderMonitor.TryDeleteFile(filePath, _maxDeleteRetries, _delayMillisecondsBetweenDeleteRetries);
             if (deleted)
             {
                 Console.WriteLine($"File '{filePath}' deleted successfully.");
