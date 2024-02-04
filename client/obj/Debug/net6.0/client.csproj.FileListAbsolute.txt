@@ -1,0 +1,15 @@
+D:\SanayM\FileTransfer\consoleApp\client\client\bin\Debug\net6.0\client.exe
+D:\SanayM\FileTransfer\consoleApp\client\client\bin\Debug\net6.0\client.dll
+D:\SanayM\FileTransfer\consoleApp\client\client\obj\Debug\net6.0\client.csproj.AssemblyReference.cache
+D:\SanayM\FileTransfer\consoleApp\client\client\obj\Debug\net6.0\client.GeneratedMSBuildEditorConfig.editorconfig
+D:\SanayM\FileTransfer\consoleApp\client\client\obj\Debug\net6.0\client.AssemblyInfoInputs.cache
+D:\SanayM\FileTransfer\consoleApp\client\client\obj\Debug\net6.0\client.AssemblyInfo.cs
+D:\SanayM\FileTransfer\consoleApp\client\client\obj\Debug\net6.0\client.csproj.CoreCompileInputs.cache
+D:\SanayM\FileTransfer\consoleApp\client\client\obj\Debug\net6.0\client.dll
+D:\SanayM\FileTransfer\consoleApp\client\client\obj\Debug\net6.0\refint\client.dll
+D:\SanayM\FileTransfer\consoleApp\client\client\obj\Debug\net6.0\client.pdb
+D:\SanayM\FileTransfer\consoleApp\client\client\bin\Debug\net6.0\client.deps.json
+D:\SanayM\FileTransfer\consoleApp\client\client\bin\Debug\net6.0\client.runtimeconfig.json
+D:\SanayM\FileTransfer\consoleApp\client\client\bin\Debug\net6.0\client.pdb
+D:\SanayM\FileTransfer\consoleApp\client\client\obj\Debug\net6.0\client.genruntimeconfig.cache
+D:\SanayM\FileTransfer\consoleApp\client\client\obj\Debug\net6.0\ref\client.dll

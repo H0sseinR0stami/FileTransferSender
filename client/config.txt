@@ -1,0 +1,10 @@
+
+windowsPath=C:\SendFolder
+linuxPath=/home/outdoor/SendFile
+sizeLimitBytes = 6442450944
+windowsIp = localhost
+linuxIp = "192.168.0.120"
+fileTransferPort = 1234
+maxDeleteFolderRetries = 10
+delayMillisecondsBetweenDeleteFolderRetries = 2000
+initialDelayMillisecondsBeforeDeleteFolder = 1000
