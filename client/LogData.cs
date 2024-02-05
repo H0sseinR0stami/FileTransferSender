@@ -4,15 +4,19 @@ public class LogData
 {
     private static readonly Configuration Config = new Configuration("../../../config.txt");
     private readonly string _logFilePath = Config.GetStringValue("logFilePath");
+    private static readonly object _lockObject = new object(); // Lock object to synchronize access to the log file
     
     public void Log(string message)
     {
         Console.WriteLine($"[{DateTime.Now}] {message}");
-        
+
         try
         {
-            // AppendAllText will create the file if it does not exist
-            File.AppendAllText(_logFilePath, $"{DateTime.Now}: {message}\n");
+            lock (_lockObject)
+            {
+                // AppendAllText will create the file if it does not exist
+                File.AppendAllText(_logFilePath, $"{DateTime.Now}: {message}\n");
+            }
         }
         catch (IOException ioEx)
         {
